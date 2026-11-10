@@ -11,6 +11,12 @@ class CPU:
         if not 0 <= reg_num < 32:
             raise ValueError("O registrador deve estar entre x0 e x31.")
 
+    @staticmethod
+    def _to_signed(value: int) -> int:
+        if value & 0x80000000:
+            return value - 0x100000000
+        return value
+
     def read_register(self, reg_num: int) -> int:
         self._validate_register(reg_num)
         if reg_num == 0:
@@ -21,6 +27,37 @@ class CPU:
         self._validate_register(reg_num)
         if reg_num != 0:
             self.registers[reg_num] = value & MASK_32
+
+    def _execute_r_type(self, funct3: int, funct7: int, val_rs1: int, val_rs2: int) -> int:
+        shamt = val_rs2 & 0x1F
+
+        if funct7 == 0x00:
+            if funct3 == 0x0:
+                return val_rs1 + val_rs2
+            if funct3 == 0x1:
+                return val_rs1 << shamt
+            if funct3 == 0x2:
+                return int(self._to_signed(val_rs1) < self._to_signed(val_rs2))
+            if funct3 == 0x3:
+                return int(val_rs1 < val_rs2)
+            if funct3 == 0x4:
+                return val_rs1 ^ val_rs2
+            if funct3 == 0x5:
+                return val_rs1 >> shamt
+            if funct3 == 0x6:
+                return val_rs1 | val_rs2
+            if funct3 == 0x7:
+                return val_rs1 & val_rs2
+
+        if funct7 == 0x20:
+            if funct3 == 0x0:
+                return val_rs1 - val_rs2
+            if funct3 == 0x5:
+                return self._to_signed(val_rs1) >> shamt
+            if funct3 == 0x6:
+                return val_rs1 | (~val_rs2 & MASK_32)
+
+        raise ValueError("Instrução não implementada.")
 
     def execute(self, instruction: int) -> None:
         if not 0 <= instruction <= MASK_32:
@@ -33,16 +70,22 @@ class CPU:
         rs2 = (instruction >> 20) & 0x1F
         funct7 = (instruction >> 25) & 0x7F
 
-        if opcode != 0x33 or funct3 != 0 or funct7 not in (0x00, 0x20):
-            raise ValueError("Instrução não implementada.")
+        if opcode == 0x33:
+            val_rs1 = self.read_register(rs1)
+            val_rs2 = self.read_register(rs2)
+            result = self._execute_r_type(funct3, funct7, val_rs1, val_rs2)
+        elif opcode == 0x13:
+            imm = (instruction >> 20) & 0xFFF
+            if imm & 0x800:
+                imm -= 0x1000
 
-        val_rs1 = self.read_register(rs1)
-        val_rs2 = self.read_register(rs2)
+            if funct3 not in (0x1, 0x5):
+                funct7 = 0x00
 
-        if funct7 == 0x00:
-            result = val_rs1 + val_rs2
+            val_rs1 = self.read_register(rs1)
+            result = self._execute_r_type(funct3, funct7, val_rs1, imm & MASK_32)
         else:
-            result = val_rs1 - val_rs2
+            raise ValueError("Instrução não implementada.")
 
         self.write_register(rd, result)
         self.pc = (self.pc + 4) & MASK_32
