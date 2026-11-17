@@ -1,10 +1,13 @@
+from memory import Memory
+
 MASK_32 = 0xFFFFFFFF
 
 
 class CPU:
-    def __init__(self):
+    def __init__(self, memory: Memory | None = None):
         self.registers = [0] * 32
         self.pc = 0x00000
+        self.memory = memory if memory is not None else Memory()
 
     @staticmethod
     def _validate_register(reg_num: int) -> None:
@@ -15,6 +18,13 @@ class CPU:
     def _to_signed(value: int) -> int:
         if value & 0x80000000:
             return value - 0x100000000
+        return value
+
+    @staticmethod
+    def _sign_extend(value: int, bits: int) -> int:
+        value &= (1 << bits) - 1
+        if value & (1 << (bits - 1)):
+            value -= 1 << bits
         return value
 
     def read_register(self, reg_num: int) -> int:
@@ -59,6 +69,22 @@ class CPU:
 
         raise ValueError("Instrução não implementada.")
 
+    def _branch_taken(self, funct3: int, val_rs1: int, val_rs2: int) -> bool:
+        if funct3 == 0x0:
+            return val_rs1 == val_rs2
+        if funct3 == 0x1:
+            return val_rs1 != val_rs2
+        if funct3 == 0x4:
+            return self._to_signed(val_rs1) < self._to_signed(val_rs2)
+        if funct3 == 0x5:
+            return self._to_signed(val_rs1) >= self._to_signed(val_rs2)
+        if funct3 == 0x6:
+            return val_rs1 < val_rs2
+        if funct3 == 0x7:
+            return val_rs1 >= val_rs2
+
+        raise ValueError("Instrução não implementada.")
+
     def execute(self, instruction: int) -> None:
         if not 0 <= instruction <= MASK_32:
             raise ValueError("A instrução deve ser uma palavra de 32 bits.")
@@ -70,22 +96,57 @@ class CPU:
         rs2 = (instruction >> 20) & 0x1F
         funct7 = (instruction >> 25) & 0x7F
 
+        next_pc = self.pc + 4
+
         if opcode == 0x33:
             val_rs1 = self.read_register(rs1)
             val_rs2 = self.read_register(rs2)
-            result = self._execute_r_type(funct3, funct7, val_rs1, val_rs2)
+            self.write_register(rd, self._execute_r_type(funct3, funct7, val_rs1, val_rs2))
         elif opcode == 0x13:
-            imm = (instruction >> 20) & 0xFFF
-            if imm & 0x800:
-                imm -= 0x1000
+            imm = self._sign_extend(instruction >> 20, 12)
 
             if funct3 not in (0x1, 0x5):
                 funct7 = 0x00
 
             val_rs1 = self.read_register(rs1)
-            result = self._execute_r_type(funct3, funct7, val_rs1, imm & MASK_32)
+            self.write_register(rd, self._execute_r_type(funct3, funct7, val_rs1, imm & MASK_32))
+        elif opcode == 0x03:
+            if funct3 != 0x2:
+                raise ValueError("Instrução não implementada.")
+
+            imm = self._sign_extend(instruction >> 20, 12)
+            address = (self.read_register(rs1) + imm) & MASK_32
+            self.write_register(rd, self.memory.read_word(address))
+        elif opcode == 0x23:
+            if funct3 != 0x2:
+                raise ValueError("Instrução não implementada.")
+
+            imm = self._sign_extend((funct7 << 5) | rd, 12)
+            address = (self.read_register(rs1) + imm) & MASK_32
+            self.memory.write_word(address, self.read_register(rs2))
+        elif opcode == 0x63:
+            imm = (
+                ((instruction >> 31) & 0x1) << 12
+                | ((instruction >> 7) & 0x1) << 11
+                | ((instruction >> 25) & 0x3F) << 5
+                | ((instruction >> 8) & 0xF) << 1
+            )
+            imm = self._sign_extend(imm, 13)
+
+            if self._branch_taken(funct3, self.read_register(rs1), self.read_register(rs2)):
+                next_pc = self.pc + imm
         else:
             raise ValueError("Instrução não implementada.")
 
-        self.write_register(rd, result)
-        self.pc = (self.pc + 4) & MASK_32
+        self.pc = next_pc & MASK_32
+
+    def step(self) -> None:
+        instruction = self.memory.read_word(self.pc)
+        self.execute(instruction)
+
+    def run(self, max_steps: int = 1000) -> int:
+        steps = 0
+        while steps < max_steps and self.memory.read_word(self.pc) != 0:
+            self.step()
+            steps += 1
+        return steps

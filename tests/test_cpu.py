@@ -157,13 +157,93 @@ class CPUTest(unittest.TestCase):
                 self.cpu.execute(instruction)
                 self.assertEqual(self.cpu.read_register(3), expected)
 
+    def test_sw_and_lw(self):
+        self.cpu.write_register(1, 0x100)
+        self.cpu.write_register(2, 0xDEADBEEF)
+        self.cpu.execute(0x0020A423)
+        self.assertEqual(self.cpu.memory.read_word(0x108), 0xDEADBEEF)
+        self.cpu.execute(0x0080A183)
+        self.assertEqual(self.cpu.read_register(3), 0xDEADBEEF)
+        self.assertEqual(self.cpu.pc, 8)
+
+    def test_sw_and_lw_with_negative_offset(self):
+        self.cpu.write_register(1, 0x100)
+        self.cpu.write_register(2, 42)
+        self.cpu.execute(0xFE20AE23)
+        self.assertEqual(self.cpu.memory.read_word(0xFC), 42)
+        self.cpu.execute(0xFFC0A183)
+        self.assertEqual(self.cpu.read_register(3), 42)
+
+    def test_lw_misaligned_address(self):
+        self.cpu.write_register(1, 0x100)
+        with self.assertRaises(ValueError):
+            self.cpu.execute(0x0020A183)
+        self.assertEqual(self.cpu.read_register(3), 0)
+        self.assertEqual(self.cpu.pc, 0)
+
+    def test_branches(self):
+        cases = [
+            (0x00208463, 5, 5, True),
+            (0x00208463, 5, 6, False),
+            (0x00209463, 5, 6, True),
+            (0x00209463, 5, 5, False),
+            (0x0020C463, 0xFFFFFFFF, 1, True),
+            (0x0020D463, 0xFFFFFFFF, 1, False),
+            (0x0020E463, 0xFFFFFFFF, 1, False),
+            (0x0020F463, 0xFFFFFFFF, 1, True),
+        ]
+        for instruction, val_rs1, val_rs2, taken in cases:
+            with self.subTest(instruction=hex(instruction), rs1=val_rs1, rs2=val_rs2):
+                cpu = CPU()
+                cpu.write_register(1, val_rs1)
+                cpu.write_register(2, val_rs2)
+                cpu.execute(instruction)
+                self.assertEqual(cpu.pc, 8 if taken else 4)
+
+    def test_branch_backwards(self):
+        self.cpu.pc = 0x20
+        self.cpu.execute(0xFE000CE3)
+        self.assertEqual(self.cpu.pc, 0x18)
+
+    def test_step_fetches_from_memory(self):
+        self.cpu.memory.load_program([0x00500093, 0x00108133])
+        self.cpu.step()
+        self.assertEqual(self.cpu.read_register(1), 5)
+        self.cpu.step()
+        self.assertEqual(self.cpu.read_register(2), 10)
+        self.assertEqual(self.cpu.pc, 8)
+
+    def test_run_loop_program(self):
+        program = [
+            0x00000093,
+            0x00100113,
+            0x00600193,
+            0x002080B3,
+            0x00110113,
+            0xFE314CE3,
+            0x10102023,
+            0x10002203,
+        ]
+        self.cpu.memory.load_program(program)
+        steps = self.cpu.run()
+        self.assertEqual(self.cpu.read_register(1), 15)
+        self.assertEqual(self.cpu.memory.read_word(0x100), 15)
+        self.assertEqual(self.cpu.read_register(4), 15)
+        self.assertEqual(self.cpu.pc, 32)
+        self.assertEqual(steps, 20)
+
+    def test_run_respects_max_steps(self):
+        self.cpu.memory.load_program([0x00000063])
+        self.assertEqual(self.cpu.run(max_steps=50), 50)
+        self.assertEqual(self.cpu.pc, 0)
+
     def test_unsupported_instructions_preserve_state(self):
         self.cpu.write_register(1, 10)
         self.cpu.write_register(2, 3)
         self.cpu.write_register(3, 99)
         self.cpu.execute(0x00208233)
         before = self.cpu.registers.copy()
-        for instruction in [0x0000A183, 0x022081B3, 0x402091B3, 0x40409193, -1, 0x1002081B3]:
+        for instruction in [0x00008183, 0x022081B3, 0x402091B3, 0x40409193, 0x0020A463, -1, 0x1002081B3]:
             with self.subTest(instruction=instruction):
                 with self.assertRaises(ValueError):
                     self.cpu.execute(instruction)

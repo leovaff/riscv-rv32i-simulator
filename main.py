@@ -44,6 +44,32 @@ def main() -> None:
         cpu.execute(instruction)
         print(f"{name} x3, x1, {imm:>2} -> x3 = 0x{cpu.read_register(3):08X}  PC = 0x{cpu.pc:08X}")
 
+    print()
+    print("Programa na memória: soma de 1 a 5")
+
+    program = [
+        0x00000093,
+        0x00100113,
+        0x00600193,
+        0x002080B3,
+        0x00110113,
+        0xFE314CE3,
+        0x10102023,
+        0x10002203,
+        0x404062B3,
+    ]
+
+    cpu = CPU()
+    cpu.memory.load_program(program)
+    steps = cpu.run()
+
+    print(f"Instruções executadas: {steps}")
+    print(f"x1 (soma) = {cpu.read_register(1)}")
+    print(f"MEM[0x100] = {cpu.memory.read_word(0x100)}")
+    print(f"x4 (LW) = {cpu.read_register(4)}")
+    print(f"x5 (ORN x0, x4) = 0x{cpu.read_register(5):08X}")
+    print(f"PC = 0x{cpu.pc:08X}")
+
 
 if __name__ == "__main__":
     main()
