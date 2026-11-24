@@ -1,9 +1,14 @@
 from computer import Computer
-from encoder import add, addi, beq, blt, bne, lw, orn, slli, sw, text_to_words
+from cpu import INTERRUPT_HANDLER
+from encoder import add, addi, beq, blt, bne, lw, mret, orn, slli, sw, text_to_words
 
 SUM_ADDRESS = 0x300
+INTERRUPT_COUNT_ADDRESS = 0x304
+SAVED_REGISTER_ADDRESS = 0x308
 MESSAGE_OK_ADDRESS = 0x400
 MESSAGE_ERROR_ADDRESS = 0x480
+
+TIMER_INTERVAL = 25
 
 MESSAGE_OK = "Grupo 13 - Simulador RISC-V\nORN OK\n"
 MESSAGE_ERROR = "Grupo 13 - Simulador RISC-V\nORN ERRO\n"
@@ -11,6 +16,11 @@ MESSAGE_ERROR = "Grupo 13 - Simulador RISC-V\nORN ERRO\n"
 
 def build_program() -> list[int]:
     return [
+        addi(8, 0, 0x4FE),
+        slli(8, 8, 9),
+        addi(9, 0, TIMER_INTERVAL),
+        sw(9, 8, 0),
+
         addi(1, 0, 0),
         addi(2, 0, 1),
         addi(3, 0, 11),
@@ -37,7 +47,19 @@ def build_program() -> list[int]:
     ]
 
 
+def build_interrupt_handler() -> list[int]:
+    return [
+        sw(28, 0, SAVED_REGISTER_ADDRESS),
+        lw(28, 0, INTERRUPT_COUNT_ADDRESS),
+        addi(28, 28, 1),
+        sw(28, 0, INTERRUPT_COUNT_ADDRESS),
+        lw(28, 0, SAVED_REGISTER_ADDRESS),
+        mret(),
+    ]
+
+
 def load_test_program(computer: Computer) -> None:
     computer.load(build_program())
+    computer.load(build_interrupt_handler(), INTERRUPT_HANDLER)
     computer.load(text_to_words(MESSAGE_OK), MESSAGE_OK_ADDRESS)
     computer.load(text_to_words(MESSAGE_ERROR), MESSAGE_ERROR_ADDRESS)

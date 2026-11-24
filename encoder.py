@@ -149,6 +149,10 @@ def bgeu(rs1: int, rs2: int, offset: int) -> int:
     return _b_type(0x7, rs1, rs2, offset)
 
 
+def mret() -> int:
+    return 0x30200073
+
+
 def text_to_words(text: str) -> list[int]:
     data = text.encode("ascii")
     data += bytes(4 - len(data) % 4)

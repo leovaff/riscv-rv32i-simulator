@@ -25,15 +25,31 @@ class Bus:
         self.address = 0
         self.data = 0
         self.control = None
+        self.interrupt = False
+        self.devices = {}
 
     @staticmethod
     def _validate_address(address: int) -> None:
         if RESERVED_START <= address < IO_START:
             raise ValueError("Endereço na área reservada.")
 
+    def attach(self, address: int, device) -> None:
+        if address < IO_START:
+            raise ValueError("Dispositivos devem ficar na região de E/S.")
+        self.devices[address] = device
+
+    def request_interrupt(self) -> None:
+        self.interrupt = True
+
+    def acknowledge_interrupt(self) -> None:
+        self.interrupt = False
+
     def read(self, address: int) -> int:
         self._validate_address(address)
-        value = self.memory.read_word(address)
+        if address in self.devices:
+            value = self.devices[address].read() & 0xFFFFFFFF
+        else:
+            value = self.memory.read_word(address)
         self.address = address
         self.control = READ
         self.data = value
@@ -41,7 +57,10 @@ class Bus:
 
     def write(self, address: int, value: int) -> None:
         self._validate_address(address)
-        self.memory.write_word(address, value)
+        if address in self.devices:
+            self.devices[address].write(value & 0xFFFFFFFF)
+        else:
+            self.memory.write_word(address, value)
         self.address = address
         self.control = WRITE
         self.data = value & 0xFFFFFFFF

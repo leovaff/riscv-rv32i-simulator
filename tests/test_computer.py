@@ -3,7 +3,8 @@ import unittest
 from bus import VRAM_START
 from computer import Computer
 from encoder import addi, slli, sw
-from program import MESSAGE_OK, SUM_ADDRESS, load_test_program
+from devices import TIMER_ADDRESS
+from program import INTERRUPT_COUNT_ADDRESS, MESSAGE_OK, SUM_ADDRESS, TIMER_INTERVAL, load_test_program
 
 
 class ComputerTest(unittest.TestCase):
@@ -52,7 +53,22 @@ class ComputerTest(unittest.TestCase):
         self.assertEqual(computer.cpu.read_register(12), 0xFF)
         self.assertEqual(computer.read_vram(), MESSAGE_OK)
         self.assertEqual(lines[-1], MESSAGE_OK.rstrip("\n"))
-        self.assertEqual(steps, 92)
+        self.assertEqual(computer.memory.read_word(INTERRUPT_COUNT_ADDRESS), 4)
+        self.assertEqual(steps, 96 + 4 * 6)
+
+    def test_interrupt_handler_preserves_register(self):
+        computer = Computer(vram_interval=1000)
+        load_test_program(computer)
+        computer.cpu.write_register(28, 1234)
+        computer.run(output=lambda line: None)
+        self.assertEqual(computer.cpu.read_register(28), 1234)
+
+    def test_timer_is_programmed_by_the_program(self):
+        computer = Computer(vram_interval=1000)
+        load_test_program(computer)
+        computer.run(output=lambda line: None)
+        self.assertEqual(computer.timer.interval, TIMER_INTERVAL)
+        self.assertEqual(computer.bus.read(TIMER_ADDRESS), TIMER_INTERVAL)
 
 
 if __name__ == "__main__":

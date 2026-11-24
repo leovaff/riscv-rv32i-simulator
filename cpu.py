@@ -1,94 +1,51 @@
+from alu import ALU
 from bus import Bus
+from control import ControlUnit
+from immediate import ImmediateGenerator
+from registers import RegisterFile
 
 MASK_32 = 0xFFFFFFFF
+MRET = 0x30200073
+INTERRUPT_HANDLER = 0x7F000
 
 
 class CPU:
     def __init__(self, bus: Bus | None = None):
-        self.registers = [0] * 32
         self.pc = 0x00000
         self.bus = bus if bus is not None else Bus()
         self.memory = self.bus.memory
+        self.register_file = RegisterFile()
+        self.control_unit = ControlUnit()
+        self.immediate_generator = ImmediateGenerator()
+        self.alu = ALU()
+        self.interrupts_enabled = True
+        self.epc = 0
 
-    @staticmethod
-    def _validate_register(reg_num: int) -> None:
-        if not 0 <= reg_num < 32:
-            raise ValueError("O registrador deve estar entre x0 e x31.")
-
-    @staticmethod
-    def _to_signed(value: int) -> int:
-        if value & 0x80000000:
-            return value - 0x100000000
-        return value
-
-    @staticmethod
-    def _sign_extend(value: int, bits: int) -> int:
-        value &= (1 << bits) - 1
-        if value & (1 << (bits - 1)):
-            value -= 1 << bits
-        return value
+    @property
+    def registers(self) -> list[int]:
+        return self.register_file.values
 
     def read_register(self, reg_num: int) -> int:
-        self._validate_register(reg_num)
-        if reg_num == 0:
-            return 0
-        return self.registers[reg_num]
+        return self.register_file.read(reg_num)
 
     def write_register(self, reg_num: int, value: int) -> None:
-        self._validate_register(reg_num)
-        if reg_num != 0:
-            self.registers[reg_num] = value & MASK_32
+        self.register_file.write(reg_num, value)
 
-    def _execute_r_type(self, funct3: int, funct7: int, val_rs1: int, val_rs2: int) -> int:
-        shamt = val_rs2 & 0x1F
-
-        if funct7 == 0x00:
-            if funct3 == 0x0:
-                return val_rs1 + val_rs2
-            if funct3 == 0x1:
-                return val_rs1 << shamt
-            if funct3 == 0x2:
-                return int(self._to_signed(val_rs1) < self._to_signed(val_rs2))
-            if funct3 == 0x3:
-                return int(val_rs1 < val_rs2)
-            if funct3 == 0x4:
-                return val_rs1 ^ val_rs2
-            if funct3 == 0x5:
-                return val_rs1 >> shamt
-            if funct3 == 0x6:
-                return val_rs1 | val_rs2
-            if funct3 == 0x7:
-                return val_rs1 & val_rs2
-
-        if funct7 == 0x20:
-            if funct3 == 0x0:
-                return val_rs1 - val_rs2
-            if funct3 == 0x5:
-                return self._to_signed(val_rs1) >> shamt
-            if funct3 == 0x6:
-                return val_rs1 | (~val_rs2 & MASK_32)
-
-        raise ValueError("Instrução não implementada.")
-
-    def _branch_taken(self, funct3: int, val_rs1: int, val_rs2: int) -> bool:
-        if funct3 == 0x0:
-            return val_rs1 == val_rs2
-        if funct3 == 0x1:
-            return val_rs1 != val_rs2
-        if funct3 == 0x4:
-            return self._to_signed(val_rs1) < self._to_signed(val_rs2)
-        if funct3 == 0x5:
-            return self._to_signed(val_rs1) >= self._to_signed(val_rs2)
-        if funct3 == 0x6:
-            return val_rs1 < val_rs2
-        if funct3 == 0x7:
-            return val_rs1 >= val_rs2
-
-        raise ValueError("Instrução não implementada.")
+    @staticmethod
+    def _branch_taken(funct3: int, alu_result: int) -> bool:
+        zero = alu_result == 0
+        if funct3 in (0x0, 0x5, 0x7):
+            return zero
+        return not zero
 
     def execute(self, instruction: int) -> None:
         if not 0 <= instruction <= MASK_32:
             raise ValueError("A instrução deve ser uma palavra de 32 bits.")
+
+        if instruction == MRET:
+            self.pc = self.epc
+            self.interrupts_enabled = True
+            return
 
         opcode = instruction & 0x7F
         rd = (instruction >> 7) & 0x1F
@@ -97,53 +54,43 @@ class CPU:
         rs2 = (instruction >> 20) & 0x1F
         funct7 = (instruction >> 25) & 0x7F
 
+        control = self.control_unit.decode(opcode)
+        operation = self.control_unit.alu_operation(opcode, funct3, funct7)
+        imm = self.immediate_generator.generate(instruction)
+
+        val_rs1 = self.register_file.read(rs1)
+        val_rs2 = self.register_file.read(rs2)
+        alu_input = imm & MASK_32 if control.alu_src else val_rs2
+        alu_result = self.alu.execute(operation, val_rs1, alu_input)
+
         next_pc = self.pc + 4
+        if control.branch and self._branch_taken(funct3, alu_result):
+            next_pc = self.pc + imm
 
-        if opcode == 0x33:
-            val_rs1 = self.read_register(rs1)
-            val_rs2 = self.read_register(rs2)
-            self.write_register(rd, self._execute_r_type(funct3, funct7, val_rs1, val_rs2))
-        elif opcode == 0x13:
-            imm = self._sign_extend(instruction >> 20, 12)
-
-            if funct3 not in (0x1, 0x5):
-                funct7 = 0x00
-
-            val_rs1 = self.read_register(rs1)
-            self.write_register(rd, self._execute_r_type(funct3, funct7, val_rs1, imm & MASK_32))
-        elif opcode == 0x03:
-            if funct3 != 0x2:
-                raise ValueError("Instrução não implementada.")
-
-            imm = self._sign_extend(instruction >> 20, 12)
-            address = (self.read_register(rs1) + imm) & MASK_32
-            self.write_register(rd, self.bus.read(address))
-        elif opcode == 0x23:
-            if funct3 != 0x2:
-                raise ValueError("Instrução não implementada.")
-
-            imm = self._sign_extend((funct7 << 5) | rd, 12)
-            address = (self.read_register(rs1) + imm) & MASK_32
-            self.bus.write(address, self.read_register(rs2))
-        elif opcode == 0x63:
-            imm = (
-                ((instruction >> 31) & 0x1) << 12
-                | ((instruction >> 7) & 0x1) << 11
-                | ((instruction >> 25) & 0x3F) << 5
-                | ((instruction >> 8) & 0xF) << 1
-            )
-            imm = self._sign_extend(imm, 13)
-
-            if self._branch_taken(funct3, self.read_register(rs1), self.read_register(rs2)):
-                next_pc = self.pc + imm
-        else:
-            raise ValueError("Instrução não implementada.")
+        write_data = alu_result
+        if control.mem_read:
+            write_data = self.bus.read(alu_result)
+        if control.mem_write:
+            self.bus.write(alu_result, val_rs2)
+        if control.reg_write:
+            self.register_file.write(rd, write_data)
 
         self.pc = next_pc & MASK_32
+
+    def check_interrupt(self) -> bool:
+        if not self.interrupts_enabled or not self.bus.interrupt:
+            return False
+
+        self.bus.acknowledge_interrupt()
+        self.epc = self.pc
+        self.pc = INTERRUPT_HANDLER
+        self.interrupts_enabled = False
+        return True
 
     def step(self) -> None:
         instruction = self.bus.read(self.pc)
         self.execute(instruction)
+        self.check_interrupt()
 
     def run(self, max_steps: int = 1000) -> int:
         steps = 0

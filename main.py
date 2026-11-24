@@ -1,5 +1,5 @@
 from computer import Computer
-from program import SUM_ADDRESS, load_test_program
+from program import INTERRUPT_COUNT_ADDRESS, SUM_ADDRESS, TIMER_INTERVAL, load_test_program
 
 VRAM_INTERVAL = 20
 
@@ -10,6 +10,7 @@ def main() -> None:
 
     print("Grupo 13: Simulador RISC-V RV32I + ORN")
     print(f"VRAM exibida a cada {VRAM_INTERVAL} instruções")
+    print(f"Interrupção do timer a cada {TIMER_INTERVAL} instruções")
     print()
 
     steps = computer.run()
@@ -18,6 +19,7 @@ def main() -> None:
     print(f"Instruções executadas: {steps}")
     print(f"Soma de 1 a 10 (MEM[0x{SUM_ADDRESS:X}]) = {computer.memory.read_word(SUM_ADDRESS)}")
     print(f"ORN 0x{computer.cpu.read_register(10):08X}, 0x{computer.cpu.read_register(11):08X} = 0x{computer.cpu.read_register(12):08X}")
+    print(f"Interrupções tratadas (MEM[0x{INTERRUPT_COUNT_ADDRESS:X}]) = {computer.memory.read_word(INTERRUPT_COUNT_ADDRESS)}")
     print(f"PC = 0x{computer.cpu.pc:08X}")
 
 

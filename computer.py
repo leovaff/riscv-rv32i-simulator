@@ -2,6 +2,7 @@ from typing import Callable
 
 from bus import RESERVED_START, VRAM_START, Bus
 from cpu import CPU
+from devices import TIMER_ADDRESS, Timer
 from memory import Memory
 
 
@@ -13,6 +14,8 @@ class Computer:
         self.memory = Memory()
         self.bus = Bus(self.memory)
         self.cpu = CPU(self.bus)
+        self.timer = Timer(self.bus)
+        self.bus.attach(TIMER_ADDRESS, self.timer)
         self.vram_interval = vram_interval
 
     def load(self, words: list[int], start: int = 0) -> None:
@@ -34,6 +37,7 @@ class Computer:
     def run(self, max_steps: int = 10000, output: Callable[[str], None] = print) -> int:
         steps = 0
         while steps < max_steps and self.bus.read(self.cpu.pc) != 0:
+            self.timer.tick()
             self.cpu.step()
             steps += 1
             if steps % self.vram_interval == 0:
