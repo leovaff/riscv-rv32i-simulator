@@ -1,13 +1,14 @@
-from memory import Memory
+from bus import Bus
 
 MASK_32 = 0xFFFFFFFF
 
 
 class CPU:
-    def __init__(self, memory: Memory | None = None):
+    def __init__(self, bus: Bus | None = None):
         self.registers = [0] * 32
         self.pc = 0x00000
-        self.memory = memory if memory is not None else Memory()
+        self.bus = bus if bus is not None else Bus()
+        self.memory = self.bus.memory
 
     @staticmethod
     def _validate_register(reg_num: int) -> None:
@@ -116,14 +117,14 @@ class CPU:
 
             imm = self._sign_extend(instruction >> 20, 12)
             address = (self.read_register(rs1) + imm) & MASK_32
-            self.write_register(rd, self.memory.read_word(address))
+            self.write_register(rd, self.bus.read(address))
         elif opcode == 0x23:
             if funct3 != 0x2:
                 raise ValueError("Instrução não implementada.")
 
             imm = self._sign_extend((funct7 << 5) | rd, 12)
             address = (self.read_register(rs1) + imm) & MASK_32
-            self.memory.write_word(address, self.read_register(rs2))
+            self.bus.write(address, self.read_register(rs2))
         elif opcode == 0x63:
             imm = (
                 ((instruction >> 31) & 0x1) << 12
@@ -141,12 +142,12 @@ class CPU:
         self.pc = next_pc & MASK_32
 
     def step(self) -> None:
-        instruction = self.memory.read_word(self.pc)
+        instruction = self.bus.read(self.pc)
         self.execute(instruction)
 
     def run(self, max_steps: int = 1000) -> int:
         steps = 0
-        while steps < max_steps and self.memory.read_word(self.pc) != 0:
+        while steps < max_steps and self.bus.read(self.pc) != 0:
             self.step()
             steps += 1
         return steps
